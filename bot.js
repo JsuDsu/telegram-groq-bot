@@ -134,16 +134,22 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, reply);
 
   } catch (error) {
-    console.log("ERROR:", error.response?.data || error.message);
+  const errData = error.response?.data || error.message;
 
-    if (error.response?.status === 429) {
-      return bot.sendMessage(chatId, "⚠️ Demasiadas solicitudes. Intenta en unos segundos.");
-    }
+  console.log("🔥 ERROR COMPLETO:", JSON.stringify(errData, null, 2));
 
-    if (error.response?.status === 401) {
-      return bot.sendMessage(chatId, "🔑 Error de autenticación.");
-    }
-
-    bot.sendMessage(chatId, "⚠️ Error inesperado.");
+  if (error.response?.status === 429) {
+    return bot.sendMessage(chatId, "⚠️ Límite alcanzado. Intenta en unos segundos.");
   }
+
+  if (error.response?.status === 401) {
+    return bot.sendMessage(chatId, "🔑 API Key inválida o vencida.");
+  }
+
+  if (error.response?.status === 400) {
+    return bot.sendMessage(chatId, "⚠️ Error en la solicitud enviada a la IA.");
+  }
+
+  bot.sendMessage(chatId, "⚠️ Error interno. Revisa logs.");
+}
 });
