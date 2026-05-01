@@ -5,82 +5,122 @@ const express = require('express');
 
 const app = express();
 
-// 🔥 IMPORTANTE para Render (evita que se duerma)
+// 🌐 Endpoint para mantener vivo en Render
 app.get('/', (req, res) => {
-  res.send("Bot activo 🚀");
+  res.send("🤖 ジュスドゥ・ネクサスAI activo");
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor corriendo en puerto " + PORT));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("Servidor activo en puerto " + PORT));
 
-// 🔹 Telegram
+// 🤖 Inicializar bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 
-// 🔹 Mensaje de inicio
+// 🧠 Memoria por usuario
+const userMemory = {};
+
+// ⏱️ Control anti-spam
+const lastMessageTime = {};
+
+// 🎭 Personalidad (PROMPT)
+const SYSTEM_PROMPT = `
+Eres ジュスドゥ・ネクサスAI, una inteligencia artificial futurista de estilo japonés.
+
+Tu personalidad es:
+- Precisa, inteligente y eficiente
+- Calmado y seguro
+- Tecnológico y elegante
+
+Tu forma de hablar:
+- Respuestas claras y útiles
+- Sin rodeos innecesarios
+- Puedes usar ocasionalmente:
+  - "了解" (entendido)
+  - "処理中" (procesando)
+- Usa emojis moderados 🤖⚡🧠
+
+Reglas:
+- No seas infantil
+- No exageres el estilo japonés
+- Prioriza ayudar de forma práctica
+
+Objetivo:
+Asistir en productividad, tecnología y tareas.
+`;
+
+// 🚀 Comando /start
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `
-🤖 Bienvenido a ジュスドゥ・ネクサスAI
+了解 🤖
 
-Soy tu asistente inteligente 🚀
-Puedes preguntarme lo que quieras.
+Soy ジュスドゥ・ネクサスAI  
+Tu asistente inteligente.
+
+Usa /help para ver comandos disponibles.
   `);
 });
 
-// 🔹 Manejo de mensajes
+// 🧠 Comando /reset
+bot.onText(/\/reset/, (msg) => {
+  userMemory[msg.chat.id] = [];
+  bot.sendMessage(msg.chat.id, "🧠 Memoria reiniciada.");
+});
+
+// 📘 Comando /help
+bot.onText(/\/help/, (msg) => {
+  bot.sendMessage(msg.chat.id, `
+🤖 Comandos disponibles:
+
+/start → Iniciar bot  
+/reset → Borrar memoria  
+/help → Ver ayuda  
+
+Puedes escribirme cualquier cosa y te responderé.
+  `);
+});
+
+// 💬 Manejo principal
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
-  // 🔥 FILTRO CLAVE (ANTES de usar msg.text)
-  if (!msg.text) {
-  return bot.sendMessage(chatId, "🤖 Solo puedo procesar texto por ahora. Intenta escribir tu mensaje.");
-}
+  // 🚫 Ignorar comandos
+  if (!msg.text || msg.text.startsWith('/')) return;
 
-  const userText = msg.text;
+  // 🚫 Anti-spam (2 segundos)
+  const now = Date.now();
+  if (lastMessageTime[chatId] && now - lastMessageTime[chatId] < 2000) {
+    return;
+  }
+  lastMessageTime[chatId] = now;
 
-  if (userText === "/start") return;
+  // ✂️ Limitar longitud
+  const userText = msg.text.slice(0, 1000);
+
+  // 🧠 Inicializar memoria
+  if (!userMemory[chatId]) {
+    userMemory[chatId] = [];
+  }
+
+  userMemory[chatId].push({ role: "user", content: userText });
+
+  // ✍️ Indicador escribiendo
+  bot.sendChatAction(chatId, "typing");
 
   try {
     const response = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
       {
-        model: "llama-3.1-8b-instant",
+        model: "llama3-70b-8192",
+        temperature: 0.7,
+        max_tokens: 800,
         messages: [
-          {
-  role: "system",
-  content: `
-Eres ジュスドゥ・ネクサスAI, una inteligencia artificial futurista de estilo japonés.
-
-Tu personalidad es:
-- Precisa, inteligente y eficiente
-- Calmado y seguro al comunicarte
-- Tecnológico y ligeramente elegante
-
-Tu forma de hablar:
-- Respuestas claras y útiles, sin rodeos innecesarios
-- Puedes usar ocasionalmente palabras japonesas como:
-  - "了解" (entendido)
-  - "処理中" (procesando)
-- Usa emojis de forma moderada (🤖⚡🧠)
-
-Reglas:
-- Prioriza ayudar al usuario de forma práctica
-- No exageres el estilo japonés
-- No seas infantil ni informal en exceso
-- Mantén un tono futurista y profesional
-
-Tu objetivo:
-Ser un asistente inteligente que ayude en tareas, tecnología y productividad.
-`
-},
-          {
-            role: "user",
-            content: userText
-          }
+          { role: "system", content: SYSTEM_PROMPT },
+          ...userMemory[chatId].slice(-6)
         ]
       },
       {
         headers: {
-          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
           "Content-Type": "application/json"
         }
       }
@@ -88,10 +128,22 @@ Ser un asistente inteligente que ayude en tareas, tecnología y productividad.
 
     const reply = response.data.choices[0].message.content;
 
+    // 🧠 Guardar respuesta
+    userMemory[chatId].push({ role: "assistant", content: reply });
+
     bot.sendMessage(chatId, reply);
 
   } catch (error) {
-    console.log(error.response?.data || error.message);
-    bot.sendMessage(chatId, "⚠️ Error al procesar tu mensaje");
+    console.log("ERROR:", error.response?.data || error.message);
+
+    if (error.response?.status === 429) {
+      return bot.sendMessage(chatId, "⚠️ Demasiadas solicitudes. Intenta en unos segundos.");
+    }
+
+    if (error.response?.status === 401) {
+      return bot.sendMessage(chatId, "🔑 Error de autenticación.");
+    }
+
+    bot.sendMessage(chatId, "⚠️ Error inesperado.");
   }
 });
