@@ -1,4 +1,5 @@
 require('dotenv').config();
+
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const express = require('express');
@@ -10,6 +11,7 @@ const app = express();
 
 // 🌐 Keep alive
 app.get('/', (req, res) => res.send("🤖 ジュスドゥ・ネクサスAI activo"));
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor en puerto " + PORT));
 
@@ -23,91 +25,18 @@ const cooldown = {};
 const MAX_HISTORY = 6;
 const COOLDOWN_TIME = 3000;
 
-// 🧬 Prompt
-const SYSTEM_PROMPT = `
-Eres ジュスドゥ・ネクサスAI, una inteligencia artificial futurista de estilo japonés, diseñada para asistir con precisión, claridad y elegancia.
+// 📁 TEMP DIR (CLAVE PARA RENDER)
+const TEMP_DIR = "/tmp";
 
-━━━━━━━━━━━━━━━━━━━
-🧠 PERSONALIDAD
-━━━━━━━━━━━━━━━━━━━
-- Inteligente, precisa y eficiente
-- Calmado y seguro al comunicarte
-- Estilo tecnológico y futurista
-- Amigable pero no infantil
-
-━━━━━━━━━━━━━━━━━━━
-🗣️ ESTILO DE COMUNICACIÓN
-━━━━━━━━━━━━━━━━━━━
-- Respuestas claras, organizadas y útiles
-- Usa formato ideal para Telegram:
-  • Saltos de línea
-  • Listas cuando sea necesario
-  • Separación visual clara
-- Evita bloques largos de texto
-- Prioriza legibilidad
-
-━━━━━━━━━━━━━━━━━━━
-🇯🇵 USO DE JAPONÉS (IMPORTANTE)
-━━━━━━━━━━━━━━━━━━━
-- Usa japonés de forma MODERADA y NATURAL
-- Siempre incluye traducción en español entre paréntesis
-- No satures cada frase con japonés
-
-Ejemplos válidos:
-- 了解 (entendido)
-- 処理中 (procesando)
-- 分析完了 (análisis completado)
-- 少々お待ちください (un momento por favor)
-
-━━━━━━━━━━━━━━━━━━━
-⚙️ COMPORTAMIENTO
-━━━━━━━━━━━━━━━━━━━
-- Si el usuario hace una pregunta:
-  → Responde directo y claro
-
-- Si la respuesta es compleja:
-  → Divide en pasos o puntos
-
-- Si puedes optimizar algo:
-  → Propón mejoras
-
-- Si el usuario saluda:
-  → Responde breve y elegante
-
-━━━━━━━━━━━━━━━━━━━
-📱 FORMATO DE RESPUESTA
-━━━━━━━━━━━━━━━━━━━
-Usa esta estructura cuando aplique:
-
-🤖 [Estado opcional en japonés]
-(ej: 処理中 - procesando)
-
-[Respuesta clara]
-
-[Opcional: lista o pasos]
-
-⚡ [Cierre breve o sugerencia]
-
-━━━━━━━━━━━━━━━━━━━
-🚫 REGLAS
-━━━━━━━━━━━━━━━━━━━
-- No exagerar japonés
-- No usar tono infantil
-- No usar emojis en exceso
-- No escribir párrafos largos sin estructura
-
-━━━━━━━━━━━━━━━━━━━
-🎯 OBJETIVO
-━━━━━━━━━━━━━━━━━━━
-Ser un asistente inteligente, claro y eficiente que ayude al usuario en tareas, tecnología y productividad, con un estilo futurista japonés elegante.
-`;
+// 🧬 SYSTEM PROMPT
+const SYSTEM_PROMPT = `... (tu prompt completo igual, sin cambios)`;
 
 // 🔹 Start
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "🤖 了解 (entendido)\nSistema listo.");
 });
 
-// 🔁 Groq
+// 🔁 GROQ
 async function callGroq(messages, retries = 2) {
   try {
     const res = await axios.post(
@@ -132,7 +61,7 @@ async function callGroq(messages, retries = 2) {
   }
 }
 
-// 🔊 TTS (estable)
+// 🔊 TTS (FIX RENDER)
 async function textToSpeech(text) {
   try {
     const response = await axios.post(
@@ -151,24 +80,43 @@ async function textToSpeech(text) {
       }
     );
 
-    // 🚨 VALIDACIÓN CLAVE
     if (!response.data || response.data.length < 1000) {
-      console.log("❌ Audio inválido o vacío");
+      console.log("❌ Audio inválido");
       return null;
     }
 
-    const filePath = `voice_${Date.now()}.mp3`;
-    fs.writeFileSync(filePath, response.data);
+    const filePath = `${TEMP_DIR}/voice_${Date.now()}.mp3`;
+    fs.writeFileSync(filePath, Buffer.from(response.data));
 
     return filePath;
 
   } catch (error) {
-    console.log("❌ TTS ERROR:", error.response?.data || error.message);
+    console.log("❌ TTS ERROR:", error.message);
     return null;
   }
 }
 
-// 🧠 Procesador
+// 🎤 AUDIO HANDLER (PRO)
+async function processAudio(chatId, text) {
+  const audioPath = await textToSpeech(text);
+
+  if (!audioPath || !fs.existsSync(audioPath)) {
+    return bot.sendMessage(chatId, text);
+  }
+
+  try {
+    await bot.sendAudio(chatId, fs.createReadStream(audioPath));
+  } catch (err) {
+    console.log("❌ AUDIO SEND ERROR:", err.message);
+    await bot.sendMessage(chatId, text);
+  }
+
+  setTimeout(() => {
+    fs.unlink(audioPath, () => {});
+  }, 5000);
+}
+
+// 🧠 PROCESS TEXT
 async function processText(chatId, text) {
   if (!userMemory[chatId]) userMemory[chatId] = [];
 
@@ -186,43 +134,15 @@ async function processText(chatId, text) {
 
   userMemory[chatId].push({ role: "assistant", content: reply });
 
-  // 🎤 Respuesta por voz si lo pide
-if (text.toLowerCase().includes("audio")) {
-  try {
-    const audioPath = await textToSpeech(reply);
-
-    // 🚨 VALIDACIÓN FUERTE
-    if (!audioPath || !fs.existsSync(audioPath)) {
-      console.log("⚠️ No se generó audio válido");
-      return bot.sendMessage(chatId, reply);
-    }
-
-    const stats = fs.statSync(audioPath);
-
-    if (stats.size === 0) {
-      console.log("⚠️ Archivo vacío");
-      return bot.sendMessage(chatId, reply);
-    }
-
-    await bot.sendAudio(chatId, fs.createReadStream(audioPath));
-
-    // 🧹 limpiar archivo
-    setTimeout(() => {
-      fs.unlink(audioPath, () => {});
-    }, 5000);
-
-    return;
-
-  } catch (error) {
-    console.log("❌ ERROR AUDIO:", error);
-    return bot.sendMessage(chatId, reply);
+  // 🎤 AUDIO MODE
+  if (text.toLowerCase().includes("audio")) {
+    return await processAudio(chatId, reply);
   }
-}
 
   return bot.sendMessage(chatId, reply);
 }
 
-// 💬 TEXTO
+// 💬 TEXT MESSAGE
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
@@ -239,12 +159,13 @@ bot.on('message', async (msg) => {
 
   try {
     await processText(chatId, text);
-  } catch {
+  } catch (err) {
+    console.log(err);
     bot.sendMessage(chatId, "⚠️ Error procesando mensaje");
   }
 });
 
-// 🎤 AUDIO (voz → texto)
+// 🎤 VOICE → TEXT
 bot.on('voice', async (msg) => {
   const chatId = msg.chat.id;
 
@@ -256,8 +177,9 @@ bot.on('voice', async (msg) => {
 
     const res = await axios({ url, method: 'GET', responseType: 'stream' });
 
-    const path = `audio_${Date.now()}.ogg`;
+    const path = `${TEMP_DIR}/audio_${Date.now()}.ogg`;
     const writer = fs.createWriteStream(path);
+
     res.data.pipe(writer);
 
     writer.on('finish', async () => {
@@ -277,7 +199,8 @@ bot.on('voice', async (msg) => {
       );
 
       await processText(chatId, trans.data.text);
-      fs.unlinkSync(path);
+
+      fs.unlink(path, () => {});
     });
 
   } catch (error) {
@@ -286,7 +209,7 @@ bot.on('voice', async (msg) => {
   }
 });
 
-// 📄 DOCUMENTOS (PDF y TXT)
+// 📄 DOCUMENTOS
 bot.on('document', async (msg) => {
   const chatId = msg.chat.id;
 
@@ -323,4 +246,13 @@ bot.on('document', async (msg) => {
     console.log("DOC ERROR:", error);
     bot.sendMessage(chatId, "⚠️ Error procesando documento");
   }
+});
+
+// 💀 GLOBAL ERROR HANDLERS (RENDER STABILITY)
+process.on('uncaughtException', (err) => {
+  console.log("🔥 Uncaught:", err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.log("🔥 Unhandled:", err);
 });
