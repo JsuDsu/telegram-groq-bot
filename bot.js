@@ -151,6 +151,12 @@ async function textToSpeech(text) {
       }
     );
 
+    // 🚨 VALIDACIÓN CLAVE
+    if (!response.data || response.data.length < 1000) {
+      console.log("❌ Audio inválido o vacío");
+      return null;
+    }
+
     const filePath = `voice_${Date.now()}.mp3`;
     fs.writeFileSync(filePath, response.data);
 
@@ -181,15 +187,37 @@ async function processText(chatId, text) {
   userMemory[chatId].push({ role: "assistant", content: reply });
 
   // 🎤 Respuesta por voz si lo pide
-  if (text.toLowerCase().includes("audio")) {
-    const audio = await textToSpeech(reply);
+if (text.toLowerCase().includes("audio")) {
+  try {
+    const audioPath = await textToSpeech(reply);
 
-    if (audio) {
-      return bot.sendVoice(chatId, {
-  source: audioPath
-});
+    // 🚨 VALIDACIÓN FUERTE
+    if (!audioPath || !fs.existsSync(audioPath)) {
+      console.log("⚠️ No se generó audio válido");
+      return bot.sendMessage(chatId, reply);
     }
+
+    const stats = fs.statSync(audioPath);
+
+    if (stats.size === 0) {
+      console.log("⚠️ Archivo vacío");
+      return bot.sendMessage(chatId, reply);
+    }
+
+    await bot.sendAudio(chatId, fs.createReadStream(audioPath));
+
+    // 🧹 limpiar archivo
+    setTimeout(() => {
+      fs.unlink(audioPath, () => {});
+    }, 5000);
+
+    return;
+
+  } catch (error) {
+    console.log("❌ ERROR AUDIO:", error);
+    return bot.sendMessage(chatId, reply);
   }
+}
 
   return bot.sendMessage(chatId, reply);
 }
